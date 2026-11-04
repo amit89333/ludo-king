@@ -395,7 +395,7 @@
     sendSocketMessage('TOGGLE_BOT', { playerId: sessionToken, color });
   };
 
-  // --- 5. BOARD CONSTRUCTION (15x15 GRID) ---
+  // --- 5. EXACT LUDO KING BOARD CONSTRUCTION (15x15 GRID) ---
   let boardConstructed = false;
   function buildBoardGrid() {
     if (boardConstructed) return;
@@ -404,48 +404,80 @@
     const b = $('board');
     let h = '';
 
-    // 4 Yards
-    const yd = (k, r, c) => `
+    // 4 Corner Yards (6x6) with white inner box and 4 pawn sockets
+    const makeYard = (k, r, c, title, isTop) => `
       <div class="yard ${k}" style="grid-area:${r}/${c}/span 6/span 6">
-        <div>
-          ${[0, 1, 2, 3].map(n => `<span class="spot" id="spot-${k}-${n}"></span>`).join('')}
+        <div class="yard-title ${isTop ? 'top' : 'bottom'}" id="yard-title-${k}">${title}</div>
+        <div class="yard-inner-box">
+          ${[0, 1, 2, 3].map(n => `
+            <div class="pawn-socket ${k}" id="socket-${k}-${n}">
+              <div class="socket-empty-dot ${k}"></div>
+            </div>
+          `).join('')}
         </div>
       </div>
     `;
 
-    h += yd('r', 1, 1) + yd('g', 1, 10) + yd('b', 10, 1) + yd('y', 10, 10);
-    h += `<div class="mid" style="grid-area:7/7/span 3/span 3">👑</div>`;
+    h += makeYard('r', 1, 1, 'Bot1', true);
+    h += makeYard('g', 1, 10, 'Bot2', true);
+    h += makeYard('b', 10, 1, 'You', false);
+    h += makeYard('y', 10, 10, 'Bot3', false);
 
-    // 4 Home Columns
-    const homeColorMap = {};
-    for (let i = 1; i <= 5; i++) {
-      homeColorMap[`7,${i}`] = 'r';
-      homeColorMap[`${i},7`] = 'g';
-      homeColorMap[`7,${14 - i}`] = 'y';
-      homeColorMap[`${14 - i},7`] = 'b';
-    }
+    // Center Finish (3x3 with 4 triangles meeting at center)
+    h += `
+      <div class="center-finish">
+        <div class="center-triangle r"></div>
+        <div class="center-triangle g"></div>
+        <div class="center-triangle y"></div>
+        <div class="center-triangle b"></div>
+      </div>
+    `;
 
-    // 8 Stops / Safe Squares (Matching Ludo King exactly)
-    const stopMap = {
-      '6,1': 'sr',   // Red Start Stop
-      '1,8': 'sg',   // Green Start Stop
-      '8,13': 'sy',  // Yellow Start Stop
-      '13,6': 'sb',  // Blue Start Stop
-      '8,2': 's',    // Top/Left Star Stop
-      '2,6': 's',    // Top/Right Star Stop
-      '6,12': 's',   // Right Star Stop
-      '12,8': 's'    // Bottom Star Stop
+    // 4 Solid Start cells
+    const startMap = {
+      '6,1': 'r-start',
+      '1,8': 'g-start',
+      '8,13': 'y-start',
+      '13,6': 'b-start',
     };
 
+    // 4 Directional Entry Arrows
+    const arrowMap = {
+      '6,0': '<span class="c-arrow r">→</span>',
+      '0,8': '<span class="c-arrow g">↓</span>',
+      '8,14': '<span class="c-arrow y">←</span>',
+      '14,6': '<span class="c-arrow b">↑</span>',
+    };
+
+    // 4 Star Stops (Safe Squares)
+    const starStopSet = new Set(['8,2', '2,6', '6,12', '12,8']);
+
+    // 4 Solid Home Path Columns
+    const homeColorMap = {};
+    for (let i = 1; i <= 5; i++) {
+      homeColorMap[`7,${i}`] = 'r-home';
+      homeColorMap[`${i},7`] = 'g-home';
+      homeColorMap[`7,${14 - i}`] = 'y-home';
+      homeColorMap[`${14 - i},7`] = 'b-home';
+    }
+
+    // Render 15x15 Track Cells
     for (let r = 0; r < 15; r++) {
       for (let c = 0; c < 15; c++) {
+        // Skip corner yards and 3x3 center finish
         if ((r < 6 || r > 8) && (c < 6 || c > 8)) continue;
         if (r > 5 && r < 9 && c > 5 && c < 9) continue;
+
         const key = `${r},${c}`;
-        const colClass = homeColorMap[key] || '';
-        const stopClass = stopMap[key] || '';
-        const star = stopClass ? '★' : '';
-        h += `<div class="c ${colClass} ${stopClass}" id="cell-${r}-${c}" style="grid-area:${r + 1}/${c + 1}">${star}</div>`;
+        const isStart = startMap[key] || '';
+        const isHome = homeColorMap[key] || '';
+        const isStar = starStopSet.has(key);
+        const arrow = arrowMap[key] || '';
+
+        const starIcon = isStar ? '<span class="star-stop">☆</span>' : '';
+        const cellClasses = `c ${isStart} ${isHome} ${isStar ? 'star-stop-cell' : ''}`;
+
+        h += `<div class="${cellClasses}" id="cell-${r}-${c}" style="grid-area:${r + 1}/${c + 1}">${arrow}${starIcon}</div>`;
       }
     }
 
@@ -459,7 +491,6 @@
     const gs = roomState.gameState;
     if (!gs) return;
 
-    // Check Winner State
     if (gs.phase === 'FINISHED') {
       stopTimerLoop();
       showScreen('win');
@@ -467,10 +498,10 @@
       return;
     }
 
-    // Render 4 Player Panels
+    // Render 4 Player Panels (matching screenshot)
     renderPlayerPanels(gs);
 
-    // Render Tokens on Board
+    // Render Teardrop Pawns on Sockets & Board
     renderTokensOnBoard(gs);
 
     // Update Bottom Bar Message & Roll Button
@@ -481,7 +512,7 @@
     rollBtn.disabled = !canRoll;
     rollBtn.onclick = handleRollClick;
 
-    $('msg').textContent = gs.lastActionDescription || (isMyTurn ? 'Your turn. Roll the dice!' : `${gs.currentTurnColor.toUpperCase()} is playing...`);
+    $('msg').textContent = gs.lastActionDescription || (isMyTurn ? 'Your turn. Tap dice to roll!' : `${gs.currentTurnColor.toUpperCase()} is playing...`);
 
     // Handle Leave Match
     $('btn-leave').onclick = () => {
@@ -492,51 +523,88 @@
     };
   }
 
-  // Player Panel HTML
-  function pnl(color, rev) {
-    const p = roomState.players.find(pl => pl.color === color) || {
-      name: color.toUpperCase(),
-      avatarEmoji: '👤',
-      color
-    };
-    const colorHex = { red: '#e8453c', green: '#22b573', yellow: '#f6a91b', blue: '#2f7df6' };
-
+  // Teardrop Pin Marker SVG (matches screenshot)
+  function pinMarkerSvg(color) {
+    const colorHex = { red: '#e52521', green: '#009e3f', yellow: '#fec200', blue: '#0078d7' };
+    const c = colorHex[color] || '#e52521';
     return `
-      <div class="p ${rev ? 'rev' : ''}" id="panel-${color}">
-        <div class="ring" id="ring-${color}">
-          <span class="av" style="background:${colorHex[color]}" id="avatar-${color}">${p.avatarEmoji || '😎'}</span>
+      <svg viewBox="0 0 24 32" width="24" height="30">
+        <defs>
+          <radialGradient id="pin-grad-${color}" cx="35%" cy="30%" r="70%">
+            <stop offset="0%" stop-color="#ffffff"/>
+            <stop offset="40%" stop-color="${c}"/>
+            <stop offset="100%" stop-color="#000000" stop-opacity="0.6"/>
+          </radialGradient>
+        </defs>
+        <path d="M 12,1 C 6,1 1,6 1,12 C 1,19 12,31 12,31 C 12,31 23,19 23,12 C 23,6 18,1 12,1 Z" fill="${c}" stroke="#ffffff" stroke-width="1.5"/>
+        <circle cx="12" cy="11" r="4.5" fill="#ffffff"/>
+      </svg>
+    `;
+  }
+
+  // 3D Teardrop Pawn SVG (matches screenshot)
+  function pawnSvg(color) {
+    return `
+      <svg viewBox="0 0 32 40" width="100%" height="100%" class="pawn-svg">
+        <defs>
+          <linearGradient id="pawn-g-${color}" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="${color === 'red' ? '#ff4d4d' : color === 'green' ? '#38df64' : color === 'yellow' ? '#ffe033' : '#3399ff'}"/>
+            <stop offset="100%" stop-color="${color === 'red' ? '#b31512' : color === 'green' ? '#006b2b' : color === 'yellow' ? '#c48800' : '#004da6'}"/>
+          </linearGradient>
+        </defs>
+        <ellipse cx="16" cy="35" rx="10" ry="3.5" fill="rgba(0,0,0,0.35)"/>
+        <ellipse cx="16" cy="33" rx="9" ry="2.6" fill="rgba(0,0,0,0.2)"/>
+        <path d="M 8,32 C 8,26 12.5,20 12.5,15 C 10.5,13.5 8,11.5 8,8 C 8,3.5 11.5,0 16,0 C 20.5,0 24,3.5 24,8 C 24,11.5 21.5,13.5 19.5,15 C 19.5,20 24,26 24,32 Z" fill="url(#pawn-g-${color})" stroke="#ffffff" stroke-width="1.2"/>
+        <circle cx="16" cy="8" r="3.6" fill="#ffffff" opacity="0.95"/>
+        <circle cx="16" cy="8" r="1.8" fill="url(#pawn-g-${color})"/>
+      </svg>
+    `;
+  }
+
+  // Player Panel HTML (Matching exact Ludo King screenshot)
+  function lkPanel(color, rev) {
+    const isRev = !!rev;
+    return `
+      <div class="lk-panel ${isRev ? 'rev' : ''}" id="panel-${color}">
+        <div class="lk-badge">${pinMarkerSvg(color)}</div>
+        <div class="lk-dice-box" id="dice-slot-${color}">
+          ${dieH(1)}
         </div>
-        <div class="info">
-          <b id="name-${color}">${p.name}</b>
-          <em id="status-${color}">${p.statusBadge || ''}</em>
-        </div>
-        <span class="dw" id="dice-slot-${color}"></span>
       </div>
     `;
   }
 
   function renderPlayerPanels(gs) {
-    $('t').innerHTML = pnl('red', false) + pnl('green', true);
-    $('bt').innerHTML = pnl('blue', false) + pnl('yellow', true);
+    $('t').innerHTML = lkPanel('red', false) + lkPanel('green', true);
+    $('bt').innerHTML = lkPanel('blue', false) + lkPanel('yellow', true);
 
     const colors = ['red', 'green', 'yellow', 'blue'];
     colors.forEach(col => {
       const panel = $(`panel-${col}`);
       const isCurrent = gs.currentTurnColor === col;
       if (panel) {
-        panel.classList.toggle('on', isCurrent);
+        panel.classList.toggle('active', isCurrent);
       }
 
+      // Update yard titles to match player names
+      const p = roomState.players.find(pl => pl.color === col);
+      const titleEl = $(`yard-title-${col[0]}`);
+      if (titleEl && p) {
+        titleEl.textContent = p.name;
+      }
+
+      // Update 3D Dice display inside the cream dice box
       const dSlot = $(`dice-slot-${col}`);
       if (dSlot) {
         if (isCurrent && gs.lastDice !== null) {
           dSlot.innerHTML = dieH(gs.lastDice, isRolling ? 'roll' : '');
           dSlot.onclick = handleRollClick;
         } else if (isCurrent && gs.phase === 'ROLL') {
-          dSlot.innerHTML = dieH(6);
+          dSlot.innerHTML = dieH(gs.lastDice || 6);
           dSlot.onclick = handleRollClick;
         } else {
-          dSlot.innerHTML = '';
+          dSlot.innerHTML = dieH(gs.players[col]?.tokens?.every(t => t.progress === -1) ? 6 : 1);
+          dSlot.onclick = null;
         }
       }
     });
@@ -562,15 +630,16 @@
     }, 450);
   }
 
-  // Render Tokens & Stacks on 15x15 Board
+  // Render 3D Teardrop Pawns & Stacks on 15x15 Ludo Board
   function renderTokensOnBoard(gs) {
-    // Clear all existing tokens from spots and cells
-    document.querySelectorAll('.tk').forEach(el => el.remove());
+    // Clear all existing pawns from sockets and cells
+    document.querySelectorAll('.pawn-pin').forEach(el => el.remove());
+    // Restore empty dots on all sockets
+    document.querySelectorAll('.socket-empty-dot').forEach(el => el.style.display = 'block');
 
     const isMyTurn = isPassAndPlay || gs.currentTurnColor === myColor;
     const validMoves = roomState.validMoves || [];
 
-    // Group active tokens by cell key for stacking badges
     const cellGroups = {};
 
     gs.activeColors.forEach(color => {
@@ -581,20 +650,23 @@
         if (token.progress === 56) return; // finished home
 
         if (token.progress === -1) {
-          // In Yard Spot
-          const spot = $(`spot-${color[0]}-${token.id}`);
-          if (spot) {
+          // In Yard Socket
+          const socket = $(`socket-${color[0]}-${token.id}`);
+          if (socket) {
+            const dot = socket.querySelector('.socket-empty-dot');
+            if (dot) dot.style.display = 'none';
+
             const isMovable = isMyTurn && gs.phase === 'MOVE' && (isPassAndPlay || color === myColor) && validMoves.some(m => m.color === color && m.tokenId === token.id);
-            const tk = document.createElement('span');
-            tk.className = `tk ${color[0]} ${isMovable ? 'movable' : ''}`;
-            tk.textContent = token.id + 1;
+            const pawn = document.createElement('div');
+            pawn.className = `pawn-pin ${isMovable ? 'movable' : ''}`;
+            pawn.innerHTML = pawnSvg(color);
             if (isMovable) {
-              tk.onclick = () => handleTokenClick(color, token.id);
+              pawn.onclick = () => handleTokenClick(color, token.id);
             }
-            spot.appendChild(tk);
+            socket.appendChild(pawn);
           }
         } else {
-          // On Track or Home Column
+          // On Track or Home Path
           const coords = window.LudoCoords.getCoordinates(color, token.progress, token.id);
           const cellKey = `${coords.row},${coords.col}`;
           if (!cellGroups[cellKey]) cellGroups[cellKey] = [];
@@ -603,7 +675,7 @@
       });
     });
 
-    // Render track tokens with stacking badges
+    // Render track pawns with stacking badges
     for (const [cellKey, list] of Object.entries(cellGroups)) {
       const [r, c] = cellKey.split(',').map(Number);
       const cell = $(`cell-${r}-${c}`);
@@ -612,26 +684,25 @@
       const topItem = list[list.length - 1];
       const isMovable = isMyTurn && gs.phase === 'MOVE' && (isPassAndPlay || topItem.color === myColor) && validMoves.some(m => m.color === topItem.color && m.tokenId === topItem.token.id);
 
-      const tk = document.createElement('span');
-      tk.className = `tk ${topItem.color[0]} ${isMovable ? 'movable' : ''}`;
-      tk.textContent = topItem.token.id + 1;
+      const pawn = document.createElement('div');
+      pawn.className = `pawn-pin ${isMovable ? 'movable' : ''}`;
+      pawn.innerHTML = pawnSvg(topItem.color);
 
-      // Stack count badge if multiple tokens on the same cell
+      // Stack count badge if multiple pawns share the square
       if (list.length > 1) {
         const badge = document.createElement('span');
-        badge.className = 'tk-badge';
+        badge.className = 'pawn-badge';
         badge.textContent = `x${list.length}`;
-        tk.appendChild(badge);
+        pawn.appendChild(badge);
       }
 
       if (isMovable) {
-        tk.onclick = () => handleTokenClick(topItem.color, topItem.token.id);
+        pawn.onclick = () => handleTokenClick(topItem.color, topItem.token.id);
       }
 
-      cell.appendChild(tk);
+      cell.appendChild(pawn);
     }
 
-    // Check lastMoveEvent for hop sound and capture shake
     if (gs.lastMoveEvent && !animatingTokens) {
       handleMoveAnimation(gs.lastMoveEvent);
     }
@@ -683,10 +754,10 @@
       // Color changes: Green -> Yellow (<10s) -> Red (<5s)
       const colorHex = remainingMs < 5000 ? '#ff5d5d' : remainingMs < 10000 ? '#f6c64b' : '#4be08f';
 
-      const ring = $(`ring-${gs.currentTurnColor}`);
-      if (ring) {
-        ring.style.setProperty('--p', pct.toFixed(1));
-        ring.style.setProperty('--c', colorHex);
+      const panel = $(`panel-${gs.currentTurnColor}`);
+      if (panel) {
+        panel.style.boxShadow = `0 0 16px ${colorHex}, 0 4px 12px rgba(0,0,0,0.5)`;
+        panel.style.borderColor = colorHex;
       }
 
       // Soft tick sound in last 5 seconds
@@ -806,7 +877,7 @@
   }
 
   function getPanelCenter(color) {
-    const el = $(`avatar-${color}`) || document.body;
+    const el = $(`panel-${color}`) || document.body;
     const rect = el.getBoundingClientRect();
     return [rect.left + rect.width / 2 - 20, rect.top + rect.height / 2 - 20];
   }

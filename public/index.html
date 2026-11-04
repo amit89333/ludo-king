@@ -73,30 +73,32 @@
       </div>
     </section>
 
-    <!-- Screen 3: Game Screen -->
+    <!-- Screen 3: Game Screen (Exact Ludo King Layout) -->
     <section class="scr" id="game">
-      <div class="top">
-        <h2>🎲 Ludo King</h2>
-        <button class="ib" id="btn-mute" aria-label="Sound">🔊</button>
-        <button class="ib" id="btn-leave" aria-label="Leave match">🚪</button>
+      <!-- Top Navigation & Controls Bar -->
+      <div class="lk-top-nav">
+        <button class="lk-circle-btn" id="btn-leave" title="Exit match">↩</button>
+        <div class="lk-top-controls">
+          <button class="ib" id="btn-mute" aria-label="Sound" title="Toggle sound">🔊</button>
+          <button class="ib" id="btn-open-emoji" aria-label="Send emoji" title="Reactions">😀</button>
+        </div>
       </div>
 
       <!-- Top Player Panels (Red left, Green right) -->
-      <div class="pl" id="t"></div>
+      <div class="lk-panels-row" id="t"></div>
 
-      <!-- 15x15 Ludo Board -->
+      <!-- 15x15 Ludo King Board Frame -->
       <div class="bw">
         <div class="board" id="board"></div>
       </div>
 
       <!-- Bottom Player Panels (Blue left, Yellow right) -->
-      <div class="pl" id="bt"></div>
+      <div class="lk-panels-row" id="bt"></div>
 
-      <!-- Bottom Status & Action Bar -->
-      <div class="bar">
-        <span id="msg">Your turn. Roll the dice!</span>
-        <button class="emo" id="btn-open-emoji" aria-label="Send emoji">😀</button>
-        <button class="chunk ye" id="btn-roll" style="width:auto;padding:12px 24px">Roll</button>
+      <!-- Live Commentary & Action Banner -->
+      <div class="bar" id="game-status-bar">
+        <span id="msg">Your turn. Tap your dice to roll!</span>
+        <button class="chunk ye" id="btn-roll" style="width:auto;padding:10px 22px;font-size:1.1rem">Roll</button>
       </div>
     </section>
 
