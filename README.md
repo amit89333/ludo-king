@@ -1,5 +1,7 @@
 # 🎲 Ludo Online (Real-Time Multiplayer)
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/amit89333/ludo-king)
+
 A responsive, real-time multiplayer Ludo web application for 2–4 players, playable instantly in any mobile or desktop browser without installing any app.
 
 Built following the **Ludo King / Ludo Online Antigravity Spec**.
