@@ -64,11 +64,31 @@
     window.scrollTo(0, 0);
   }
 
+  const AVATAR_OPTIONS = ['😎', '🦁', '👑', '🦊', '🐼', '🦄', '⚡', '🚀', '🐯', '🐉', '🐱', '🤖'];
+  let selectedProfileEmoji = avatarEmoji;
+
   // --- 1. HOME SCREEN INITIALIZATION ---
   function initHome() {
-    $('home-name').innerHTML = `${playerName}<small>Level 1 · Rookie</small>`;
-    $('home-av').textContent = avatarEmoji;
+    updateProfileDisplay();
     $('hd').outerHTML = dieH(6, 'big').replace('class="die big"', 'class="die big" id="hd"');
+
+    // Edit Profile Modal
+    $('btn-edit-profile').onclick = () => {
+      openProfileSheet();
+    };
+
+    $('btn-save-profile').onclick = () => {
+      const newName = ($('input-profile-name').value || '').trim();
+      playerName = newName.substring(0, 16) || 'Player';
+      avatarEmoji = selectedProfileEmoji || '😎';
+
+      localStorage.setItem('ludo_player_name', playerName);
+      localStorage.setItem('ludo_avatar_emoji', avatarEmoji);
+
+      updateProfileDisplay();
+      closeSheets();
+      toast(`Profile saved! Name: ${playerName}`);
+    };
 
     // Mute button in game header
     const muteBtn = $('btn-mute');
@@ -709,9 +729,43 @@
     });
   }
 
+  function updateProfileDisplay() {
+    const dispEl = $('display-name');
+    if (dispEl) dispEl.textContent = playerName;
+    const avEl = $('home-av');
+    if (avEl) avEl.textContent = avatarEmoji;
+  }
+
+  function openProfileSheet() {
+    $('input-profile-name').value = playerName;
+    selectedProfileEmoji = avatarEmoji;
+    renderAvatarChips();
+    $('profile-sheet').classList.add('on');
+    $('veil').classList.add('on');
+  }
+
+  function renderAvatarChips() {
+    const container = $('avatar-chips');
+    if (!container) return;
+    container.innerHTML = AVATAR_OPTIONS.map(em => `
+      <button class="chip" data-em="${em}" aria-pressed="${selectedProfileEmoji === em}" style="font-size:1.4rem;padding:6px 12px">
+        ${em}
+      </button>
+    `).join('');
+
+    container.querySelectorAll('.chip').forEach(btn => {
+      btn.onclick = () => {
+        selectedProfileEmoji = btn.dataset.em;
+        renderAvatarChips();
+      };
+    });
+  }
+
   function closeSheets() {
     $('sheet').classList.remove('on');
     $('join-sheet').classList.remove('on');
+    const profSheet = $('profile-sheet');
+    if (profSheet) profSheet.classList.remove('on');
     $('veil').classList.remove('on');
   }
 

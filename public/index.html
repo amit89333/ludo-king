@@ -12,9 +12,15 @@
 
     <!-- Screen 1: Home Menu -->
     <section class="scr on" id="home">
-      <div class="prof">
+      <div class="prof" id="btn-edit-profile" title="Tap to change your name and avatar" style="cursor:pointer">
         <span class="av" id="home-av" style="background:var(--b)">😎</span>
-        <b id="home-name">Player<small>Level 1 · Rookie</small></b>
+        <div style="flex:1;min-width:0">
+          <b id="home-name" style="display:flex;align-items:center;gap:6px">
+            <span id="display-name">Player</span>
+            <span style="font-size:0.85rem;opacity:0.8">✏️</span>
+          </b>
+          <small style="display:block;opacity:0.7;font-weight:600">Level 1 · Rookie · Tap to edit</small>
+        </div>
         <span class="coin">🪙 500</span>
       </div>
 
@@ -113,6 +119,20 @@
       <button class="chunk" id="btn-win-home" style="margin-top:12px;background:rgba(255,255,255,.15)">Home</button>
     </section>
 
+  </div>
+
+  <!-- Edit Profile Sheet -->
+  <div class="sheet" id="profile-sheet" role="dialog" aria-modal="true" aria-label="Edit Profile">
+    <h3>Edit Profile</h3>
+    <p style="color:var(--mut);font-weight:600;font-size:0.85rem;margin-bottom:10px">Choose your display name and avatar.</p>
+
+    <label style="font-size:0.75rem;font-weight:800;color:var(--mut);text-transform:uppercase">Your Name</label>
+    <input type="text" id="input-profile-name" class="code-input" maxlength="16" placeholder="Enter your name" style="letter-spacing:normal;font-size:1.25rem;text-transform:none;text-align:left;padding:12px 14px">
+
+    <label style="font-size:0.75rem;font-weight:800;color:var(--mut);text-transform:uppercase;display:block;margin-top:10px">Choose Avatar</label>
+    <div class="chips" id="avatar-chips" style="margin-top:6px;gap:8px"></div>
+
+    <button class="chunk gr" id="btn-save-profile" style="margin-top:14px">Save Profile</button>
   </div>
 
   <!-- Join Private Room Sheet -->
