@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: ludo-online
+    runtime: node
+    plan: free
+    buildCommand: "echo 'No build step required (native TS/Node.js)'"
+    startCommand: "npm start"
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: PORT
+        value: 10000
