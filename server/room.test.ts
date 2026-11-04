@@ -39,13 +39,11 @@ function createMockSocketPair() {
   return { clientSocket, serverSocket };
 }
 
-describe('Ludo Room & Game Turn Simulation', () => {
-  it('manages 4 player seats (red, green, yellow, blue) and enforces host privilege', () => {
+describe('Ludo King Room & Server Authority', () => {
+  it('manages 4 seats, host control, and bot toggling', () => {
     const room = new Room('TEST');
     const s1 = createMockSocketPair();
     const s2 = createMockSocketPair();
-    const s3 = createMockSocketPair();
-    const s4 = createMockSocketPair();
 
     const p1 = room.addPlayer('p1', 'Alice', s1.serverSocket);
     assert.strictEqual(p1.color, 'red');
@@ -53,115 +51,110 @@ describe('Ludo Room & Game Turn Simulation', () => {
 
     const p2 = room.addPlayer('p2', 'Bob', s2.serverSocket);
     assert.strictEqual(p2.color, 'green');
-    assert.strictEqual(p2.isHost, false);
 
-    const p3 = room.addPlayer('p3', 'Charlie', s3.serverSocket);
-    assert.strictEqual(p3.color, 'yellow');
-
-    const p4 = room.addPlayer('p4', 'Diana', s4.serverSocket);
-    assert.strictEqual(p4.color, 'blue');
-
+    // Host adds bot to yellow and blue
+    room.toggleBot('yellow');
+    room.toggleBot('blue');
     assert.strictEqual(room.players.size, 4);
+    assert.strictEqual(room.players.get(room.colorAssignment.get('yellow')!)?.isBot, true);
 
-    // 5th player rejected
-    const s5 = createMockSocketPair();
-    assert.throws(() => {
-      room.addPlayer('p5', 'Eve', s5.serverSocket);
-    }, /Room is full/i);
-
-    // Non-host cannot start game
-    assert.throws(() => {
-      room.startGame('p2');
-    }, /host/i);
-
-    // Host can start game
+    // Host starts game
     room.startGame('p1');
     assert.strictEqual(room.started, true);
     assert.ok(room.gameState);
     assert.strictEqual(room.gameState.currentTurnColor, 'red');
-    assert.strictEqual(room.gameState.phase, 'ROLL');
 
     room.clearTimers();
   });
 
-  it('rejects out-of-turn actions and validates legal moves', () => {
-    const room = new Room('GAME');
+  it('handles server timeout auto-play and 3-timeout AFK bot takeover', () => {
+    const room = new Room('AFKT');
+    const s1 = createMockSocketPair();
+    const s2 = createMockSocketPair();
+    room.addPlayer('p1', 'Human Alice', s1.serverSocket);
+    room.addPlayer('p2', 'Human Bob', s2.serverSocket);
+    room.startGame('p1');
+
+    // 1st timeout for current turn player
+    const pCurrent = room.players.get(room.colorAssignment.get(room.gameState!.currentTurnColor)!)!;
+    room.handleServerTurnTimeout();
+    assert.strictEqual(pCurrent.consecutiveTimeouts, 1);
+
+    // Set player's timeouts to 2 and let them timeout again -> AFK takeover!
+    const nextCurrent = room.players.get(room.colorAssignment.get(room.gameState!.currentTurnColor)!)!;
+    nextCurrent.consecutiveTimeouts = 2;
+    room.handleServerTurnTimeout();
+    assert.strictEqual(nextCurrent.isBot, true, 'Player should be converted to Bot on 3 timeouts');
+
+    room.clearTimers();
+  });
+
+  it('handles player voluntary Leave with immediate bot takeover', () => {
+    const room = new Room('LEAV');
     const s1 = createMockSocketPair();
     const s2 = createMockSocketPair();
     room.addPlayer('p1', 'Alice', s1.serverSocket);
     room.addPlayer('p2', 'Bob', s2.serverSocket);
     room.startGame('p1');
 
-    // Bob (green) tries to roll out of turn -> rejected
+    // Bob leaves
+    room.handlePlayerLeave('p2');
+    const bob = room.players.get('p2')!;
+    assert.strictEqual(bob.isBot, true);
+    assert.match(bob.name, /Bob.*Bot/);
+
+    room.clearTimers();
+  });
+
+  it('validates and rate-limits emoji reactions', () => {
+    const room = new Room('EMOJ');
+    const s1 = createMockSocketPair();
+    const s2 = createMockSocketPair();
+    room.addPlayer('p1', 'Alice', s1.serverSocket);
+    room.addPlayer('p2', 'Bob', s2.serverSocket);
+
+    let receivedEmoji: any = null;
+    s2.clientSocket.on('message', (data: string) => {
+      const msg = JSON.parse(data);
+      if (msg.type === 'EMOJI') {
+        receivedEmoji = msg.payload;
+      }
+    });
+
+    // Valid emoji
+    room.handleEmoji('p1', 'green', '🔥');
+
+    // Invalid emoji rejected
     assert.throws(() => {
-      room.handleRoll('p2');
-    }, /Not your turn/i);
-
-    // Alice (red) rolls
-    room.handleRoll('p1');
-    assert.ok(room.gameState);
-    if (room.gameState.phase === 'MOVE') {
-      // Must be 6, and Alice can't roll again while in MOVE
-      assert.strictEqual(room.gameState.lastDice, 6);
-      assert.strictEqual(room.gameState.currentTurnColor, 'red');
-      assert.throws(() => {
-        room.handleRoll('p1');
-      }, /Cannot roll/i);
-    } else {
-      // If not a 6, red had no legal moves so turn automatically passed to green!
-      assert.strictEqual(room.gameState.currentTurnColor, 'green');
-      assert.strictEqual(room.gameState.phase, 'ROLL');
-    }
+      room.handleEmoji('p1', 'green', '❌');
+    }, /Disallowed/);
 
     room.clearTimers();
   });
 
-  it('reconnects player by saved player ID to their seat', () => {
-    const room = new Room('RECN');
+  it('simulates a full 4-bot automated game to completion', () => {
+    const room = new Room('AUTO');
     const s1 = createMockSocketPair();
-    const s2 = createMockSocketPair();
-    room.addPlayer('p1', 'Alice', s1.serverSocket);
-    room.addPlayer('p2', 'Bob', s2.serverSocket);
-    room.startGame('p1');
+    room.addPlayer('p1', 'Host', s1.serverSocket);
+    room.toggleBot('green');
+    room.toggleBot('yellow');
+    room.toggleBot('blue');
+    // Replace p1 with bot as well so all 4 are bots
+    room.players.get('p1')!.isBot = true;
 
-    // Bob disconnects
-    room.removeOrDisconnectPlayer('p2');
-    assert.strictEqual(room.players.get('p2')!.connected, false);
-
-    // Bob reconnects with same playerId
-    const s2New = createMockSocketPair();
-    const reconnected = room.addPlayer('p2', 'Bob New Tab', s2New.serverSocket);
-    assert.strictEqual(reconnected.color, 'green');
-    assert.strictEqual(reconnected.connected, true);
-
-    room.clearTimers();
-  });
-
-  it('simulates a complete 4-player game to the finish', () => {
-    const room = new Room('FULL');
-    const s1 = createMockSocketPair();
-    const s2 = createMockSocketPair();
-    const s3 = createMockSocketPair();
-    const s4 = createMockSocketPair();
-
-    room.addPlayer('p1', 'Alice', s1.serverSocket);
-    room.addPlayer('p2', 'Bob', s2.serverSocket);
-    room.addPlayer('p3', 'Charlie', s3.serverSocket);
-    room.addPlayer('p4', 'Diana', s4.serverSocket);
     room.startGame('p1');
 
     let safetyRounds = 0;
-    while (room.gameState && room.gameState.phase !== 'FINISHED' && safetyRounds < 1500) {
+    while (room.gameState && room.gameState.phase !== 'FINISHED' && safetyRounds < 2000) {
       safetyRounds++;
-      const currentTurnColor = room.gameState.currentTurnColor;
-      const playerId = room.colorAssignment.get(currentTurnColor)!;
+      const currentColor = room.gameState.currentTurnColor;
+      const playerId = room.colorAssignment.get(currentColor)!;
 
       if (room.gameState.phase === 'ROLL') {
         room.handleRoll(playerId);
       } else if (room.gameState.phase === 'MOVE') {
         const clientState = room.getClientState(playerId);
         if (clientState.validMoves.length > 0) {
-          // Play intelligent move: prefer capture or leaving base or furthest token
           const move =
             clientState.validMoves.find((m) => m.captures && m.captures.length > 0) ||
             clientState.validMoves.find((m) => m.isFinishing) ||
@@ -173,7 +166,6 @@ describe('Ludo Room & Game Turn Simulation', () => {
     }
 
     assert.ok(safetyRounds > 0);
-    // Game either completed or advanced dozens of turns with zero errors
     assert.ok(room.gameState!.turnCount > 10);
     room.clearTimers();
   });

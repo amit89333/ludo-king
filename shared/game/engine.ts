@@ -5,6 +5,7 @@ import type {
   Token,
   ValidMove,
   MoveIntent,
+  MoveStepEvent,
 } from './types.ts';
 import {
   START_CELLS,
@@ -13,9 +14,13 @@ import {
   TOTAL_TRACK_CELLS,
   MAX_TRACK_PROGRESS,
   FINISHED_PROGRESS,
+  TURN_TIMEOUT_MS,
 } from './types.ts';
 
-export function createInitialState(activeColors: PlayerColor[] = COLOR_ORDER): GameState {
+export function createInitialState(
+  activeColors: PlayerColor[] = COLOR_ORDER,
+  now: number = Date.now()
+): GameState {
   if (!activeColors || activeColors.length === 0) {
     activeColors = [...COLOR_ORDER];
   }
@@ -32,6 +37,8 @@ export function createInitialState(activeColors: PlayerColor[] = COLOR_ORDER): G
       color,
       tokens,
       hasWon: false,
+      capturesCount: 0,
+      tokensLostCount: 0,
     };
   }
 
@@ -45,7 +52,9 @@ export function createInitialState(activeColors: PlayerColor[] = COLOR_ORDER): G
     winner: null,
     winningOrder: [],
     turnCount: 1,
+    turnDeadline: now + TURN_TIMEOUT_MS,
     lastActionDescription: 'Game started. Roll dice to begin.',
+    lastMoveEvent: null,
   };
 }
 
@@ -64,6 +73,33 @@ export function isSafeCell(absoluteTrackCell: number): boolean {
   return SAFE_SQUARES.has(absoluteTrackCell);
 }
 
+export function findCaptures(
+  state: GameState,
+  movingColor: PlayerColor,
+  targetAbsoluteCell: number
+): { color: PlayerColor; tokenId: number }[] {
+  // Safe squares / stops NEVER allow capture
+  if (isSafeCell(targetAbsoluteCell)) {
+    return [];
+  }
+
+  const captures: { color: PlayerColor; tokenId: number }[] = [];
+  for (const color of state.activeColors) {
+    if (color === movingColor) continue;
+    const opponent = state.players[color];
+    for (const token of opponent.tokens) {
+      if (token.progress >= 0 && token.progress <= MAX_TRACK_PROGRESS) {
+        const abs = getAbsoluteTrackCell(token.color, token.progress);
+        if (abs === targetAbsoluteCell) {
+          captures.push({ color: token.color, tokenId: token.id });
+        }
+      }
+    }
+  }
+
+  return captures;
+}
+
 export function getValidMoves(state: GameState, dice: number): ValidMove[] {
   if (state.phase === 'FINISHED') return [];
   const player = state.players[state.currentTurnColor];
@@ -73,7 +109,7 @@ export function getValidMoves(state: GameState, dice: number): ValidMove[] {
 
   for (const token of player.tokens) {
     if (token.progress === FINISHED_PROGRESS) {
-      // Already finished, cannot move
+      // Already home, cannot move
       continue;
     }
 
@@ -120,43 +156,17 @@ export function getValidMoves(state: GameState, dice: number): ValidMove[] {
   return validMoves;
 }
 
-function findCaptures(
-  state: GameState,
-  movingColor: PlayerColor,
-  targetAbsoluteCell: number
-): { color: PlayerColor; tokenId: number }[] {
-  // Safe squares never capture
-  if (isSafeCell(targetAbsoluteCell)) {
-    return [];
-  }
-
-  const captures: { color: PlayerColor; tokenId: number }[] = [];
-  for (const color of state.activeColors) {
-    if (color === movingColor) continue;
-    const opponent = state.players[color];
-    for (const token of opponent.tokens) {
-      if (token.progress >= 0 && token.progress <= MAX_TRACK_PROGRESS) {
-        const abs = getAbsoluteTrackCell(token.color, token.progress);
-        if (abs === targetAbsoluteCell) {
-          captures.push({ color: token.color, tokenId: token.id });
-        }
-      }
-    }
-  }
-
-  return captures;
-}
-
 function cloneState(state: GameState): GameState {
   return JSON.parse(JSON.stringify(state));
 }
 
-export function nextTurn(state: GameState): void {
+export function nextTurn(state: GameState, now: number = Date.now()): void {
   const activeUnfinished = state.activeColors.filter((c) => !state.players[c].hasWon);
   if (activeUnfinished.length <= 1) {
     state.phase = 'FINISHED';
     if (activeUnfinished.length === 1 && !state.winningOrder.includes(activeUnfinished[0])) {
       state.winningOrder.push(activeUnfinished[0]);
+      state.players[activeUnfinished[0]].rank = state.winningOrder.length;
     }
     return;
   }
@@ -174,10 +184,11 @@ export function nextTurn(state: GameState): void {
   state.phase = 'ROLL';
   state.lastDice = null;
   state.consecutiveSixes = 0;
+  state.turnDeadline = now + TURN_TIMEOUT_MS;
   state.turnCount++;
 }
 
-export function applyRoll(state: GameState, dice: number): GameState {
+export function applyRoll(state: GameState, dice: number, now: number = Date.now()): GameState {
   const next = cloneState(state);
 
   if (next.phase !== 'ROLL') {
@@ -193,10 +204,10 @@ export function applyRoll(state: GameState, dice: number): GameState {
   if (dice === 6) {
     next.consecutiveSixes += 1;
     if (next.consecutiveSixes === 3) {
-      // Three 6s in a row forfeits the turn
+      // Three consecutive 6s in a row cancels the 3rd roll and forfeits turn
       next.lastActionDescription = `${next.currentTurnColor} rolled three 6s in a row! Turn forfeited.`;
       next.consecutiveSixes = 0;
-      nextTurn(next);
+      nextTurn(next, now);
       return next;
     }
   } else {
@@ -207,17 +218,18 @@ export function applyRoll(state: GameState, dice: number): GameState {
 
   if (validMoves.length === 0) {
     // No legal moves: pass turn automatically
-    next.lastActionDescription = `${next.currentTurnColor} rolled a ${dice} but has no legal moves. Turn passed.`;
-    nextTurn(next);
+    next.lastActionDescription = `${next.currentTurnColor} rolled a ${dice} with no legal moves. Passing turn...`;
+    nextTurn(next, now);
   } else {
     next.phase = 'MOVE';
+    next.turnDeadline = now + TURN_TIMEOUT_MS; // fresh 30s allowance for move
     next.lastActionDescription = `${next.currentTurnColor} rolled a ${dice}. Choose a token to move.`;
   }
 
   return next;
 }
 
-export function applyMove(state: GameState, moveIntent: MoveIntent): GameState {
+export function applyMove(state: GameState, moveIntent: MoveIntent, now: number = Date.now()): GameState {
   const next = cloneState(state);
 
   if (next.phase !== 'MOVE') {
@@ -245,24 +257,41 @@ export function applyMove(state: GameState, moveIntent: MoveIntent): GameState {
   const player = next.players[moveIntent.color];
   const token = player.tokens.find((t) => t.id === moveIntent.tokenId)!;
 
-  // Apply movement
+  // Build step-by-step hop path for 120ms animation
+  const path: number[] = [];
+  if (matchedMove.isLeavingBase) {
+    path.push(0);
+  } else {
+    for (let p = matchedMove.fromProgress + 1; p <= matchedMove.toProgress; p++) {
+      path.push(p);
+    }
+  }
+
+  // Apply token movement
   token.progress = matchedMove.toProgress;
 
-  // Apply captures if any
+  // Apply captures ("cutting opponent pawn")
+  const capturedList: { color: PlayerColor; tokenId: number }[] = [];
   let captureNotice = '';
+
   if (matchedMove.captures && matchedMove.captures.length > 0) {
     for (const cap of matchedMove.captures) {
       const capturedToken = next.players[cap.color].tokens.find((t) => t.id === cap.tokenId);
       if (capturedToken) {
-        capturedToken.progress = -1; // back to base!
+        capturedToken.progress = -1; // back to yard
+        capturedList.push({ color: cap.color, tokenId: cap.tokenId });
+        next.players[cap.color].tokensLostCount += 1;
       }
     }
-    const capNames = matchedMove.captures.map((c) => `${c.color} token #${c.tokenId}`).join(', ');
-    captureNotice = ` and captured ${capNames}!`;
+    player.capturesCount += capturedList.length;
+    const names = capturedList.map((c) => `${c.color} token #${c.tokenId + 1}`).join(', ');
+    captureNotice = ` and cut ${names}!`;
   }
 
   // Check if player won
+  const reachedHomeJustNow = matchedMove.toProgress === FINISHED_PROGRESS;
   const allHome = player.tokens.every((t) => t.progress === FINISHED_PROGRESS);
+
   if (allHome && !player.hasWon) {
     player.hasWon = true;
     next.winningOrder.push(player.color);
@@ -272,23 +301,60 @@ export function applyMove(state: GameState, moveIntent: MoveIntent): GameState {
     }
   }
 
-  // Check if whole game is finished
+  // Determine Extra Turn Reason (Ludo King rules):
+  // 1. Rolled a 6
+  // 2. Captured opponent pawn
+  // 3. Reached home
+  let extraTurnReason: 'six' | 'capture' | 'home' | undefined;
+  if (!player.hasWon) {
+    if (capturedList.length > 0) {
+      extraTurnReason = 'capture';
+    } else if (reachedHomeJustNow) {
+      extraTurnReason = 'home';
+    } else if (dice === 6) {
+      extraTurnReason = 'six';
+    }
+  }
+
+  const moveEvent: MoveStepEvent = {
+    color: moveIntent.color,
+    tokenId: moveIntent.tokenId,
+    fromProgress: matchedMove.fromProgress,
+    toProgress: matchedMove.toProgress,
+    path,
+    captures: capturedList,
+    extraTurnReason,
+  };
+  next.lastMoveEvent = moveEvent;
+
+  // Check if game is completed (only 1 or 0 players left unfinished)
   const unfinishedCount = next.activeColors.filter((c) => !next.players[c].hasWon).length;
   if (unfinishedCount <= 1) {
     next.phase = 'FINISHED';
+    const remaining = next.activeColors.find((c) => !next.players[c].hasWon);
+    if (remaining && !next.winningOrder.includes(remaining)) {
+      next.winningOrder.push(remaining);
+      next.players[remaining].rank = next.winningOrder.length;
+    }
     next.lastActionDescription = `${next.winner} won the game!`;
     return next;
   }
 
-  // Extra turn rule:
-  // Rolling a 6 gives an extra turn (if player hasn't already won)
-  if (dice === 6 && !player.hasWon) {
+  // Handle extra turn or advance turn
+  if (extraTurnReason) {
     next.phase = 'ROLL';
     next.lastDice = null;
-    next.lastActionDescription = `${next.currentTurnColor} moved token #${token.id}${captureNotice} and rolled a 6, so gets an extra turn!`;
+    next.turnDeadline = now + TURN_TIMEOUT_MS;
+    const reasonText =
+      extraTurnReason === 'capture'
+        ? 'cut an opponent'
+        : extraTurnReason === 'home'
+        ? 'reached home'
+        : 'rolled a 6';
+    next.lastActionDescription = `${moveIntent.color} moved token #${token.id + 1}${captureNotice} and got an extra turn (${reasonText})!`;
   } else {
-    nextTurn(next);
-    next.lastActionDescription = `${moveIntent.color} moved token #${token.id}${captureNotice}. Next turn: ${next.currentTurnColor}.`;
+    nextTurn(next, now);
+    next.lastActionDescription = `${moveIntent.color} moved token #${token.id + 1}${captureNotice}. Next turn: ${next.currentTurnColor}.`;
   }
 
   return next;

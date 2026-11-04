@@ -11,6 +11,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
 const PUBLIC_DIR = path.resolve(ROOT_DIR, 'public');
+const SHARED_DIR = path.resolve(ROOT_DIR, 'shared');
+
+function sanitizeName(name: string): string {
+  if (!name || typeof name !== 'string') return 'Player';
+  return name.replace(/[<>&"']/g, '').trim().substring(0, 16) || 'Player';
+}
 
 export class LudoServer {
   public server: http.Server;
@@ -45,11 +51,16 @@ export class LudoServer {
       return;
     }
 
-    // Serve static files from public directory
-    let filePath = path.join(PUBLIC_DIR, pathname === '/' ? 'index.html' : pathname);
+    // Allow serving shared coords.js or game modules if requested
+    let filePath: string;
+    if (pathname.startsWith('/shared/')) {
+      filePath = path.join(SHARED_DIR, pathname.replace('/shared/', ''));
+    } else {
+      filePath = path.join(PUBLIC_DIR, pathname === '/' ? 'index.html' : pathname);
+    }
 
     // Normalize and prevent path traversal
-    if (!filePath.startsWith(PUBLIC_DIR)) {
+    if (!filePath.startsWith(PUBLIC_DIR) && !filePath.startsWith(SHARED_DIR)) {
       res.writeHead(403, { 'Content-Type': 'text/plain' });
       res.end('Forbidden');
       return;
@@ -98,14 +109,36 @@ export class LudoServer {
           const { type, payload } = msg;
 
           switch (type) {
+            case 'TIME_SYNC': {
+              ws.send(
+                JSON.stringify({
+                  type: 'TIME_SYNC_RESP',
+                  payload: {
+                    clientSendTime: payload?.clientSendTime || 0,
+                    serverNow: Date.now(),
+                  },
+                })
+              );
+              break;
+            }
+
             case 'CREATE_ROOM': {
               const code = this.generateRoomCode();
               const room = new Room(code);
+              room.onEmptyRoomCleanup = (c) => this.rooms.delete(c);
               this.rooms.set(code, room);
+
               currentRoomCode = code;
               currentPlayerId = payload.playerId;
+              const safeName = sanitizeName(payload.playerName);
 
-              const player = room.addPlayer(payload.playerId, payload.playerName, ws);
+              const player = room.addPlayer(
+                payload.playerId,
+                safeName,
+                ws,
+                payload.avatarEmoji || '😎'
+              );
+
               ws.send(
                 JSON.stringify({
                   type: 'ROOM_CREATED',
@@ -114,6 +147,7 @@ export class LudoServer {
                     player: {
                       id: player.id,
                       name: player.name,
+                      avatarEmoji: player.avatarEmoji,
                       color: player.color,
                       isHost: player.isHost,
                     },
@@ -139,7 +173,13 @@ export class LudoServer {
               }
 
               try {
-                const player = room.addPlayer(payload.playerId, payload.playerName, ws);
+                const safeName = sanitizeName(payload.playerName);
+                const player = room.addPlayer(
+                  payload.playerId,
+                  safeName,
+                  ws,
+                  payload.avatarEmoji || '😎'
+                );
                 currentRoomCode = targetCode;
                 currentPlayerId = payload.playerId;
 
@@ -151,6 +191,7 @@ export class LudoServer {
                       player: {
                         id: player.id,
                         name: player.name,
+                        avatarEmoji: player.avatarEmoji,
                         color: player.color,
                         isHost: player.isHost,
                       },
@@ -187,7 +228,6 @@ export class LudoServer {
               }
 
               room.toggleBot(payload.color as PlayerColor);
-              room.broadcastState();
               break;
             }
 
@@ -245,11 +285,23 @@ export class LudoServer {
               break;
             }
 
-            case 'REACTION': {
+            case 'LEAVE_MATCH': {
               if (!currentRoomCode) return;
               const room = this.rooms.get(currentRoomCode);
               if (!room) return;
-              room.broadcastReaction(payload.playerId, payload.emoji);
+              room.handlePlayerLeave(payload.playerId);
+              break;
+            }
+
+            case 'EMOJI': {
+              if (!currentRoomCode) return;
+              const room = this.rooms.get(currentRoomCode);
+              if (!room) return;
+              try {
+                room.handleEmoji(payload.playerId, payload.to, payload.emoji);
+              } catch (e: any) {
+                // disallowed emoji or rate limited
+              }
               break;
             }
 
@@ -270,7 +322,7 @@ export class LudoServer {
         if (currentRoomCode && currentPlayerId) {
           const room = this.rooms.get(currentRoomCode);
           if (room) {
-            room.removeOrDisconnectPlayer(currentPlayerId);
+            room.handlePlayerDisconnect(currentPlayerId);
           }
         }
       });
@@ -281,11 +333,11 @@ export class LudoServer {
     this.cleanupInterval = setInterval(() => {
       const now = Date.now();
       for (const [code, room] of this.rooms.entries()) {
-        const connectedCount = Array.from(room.players.values()).filter(
+        const humanCount = Array.from(room.players.values()).filter(
           (p) => !p.isBot && p.connected
         ).length;
-        // Inactive if empty for > 15 minutes
-        if (connectedCount === 0 && now - room.lastActiveAt > 15 * 60 * 1000) {
+        // Inactive if empty for > 5 minutes
+        if (humanCount === 0 && now - room.lastActiveAt > 5 * 60 * 1000) {
           room.clearTimers();
           this.rooms.delete(code);
         }
@@ -316,6 +368,6 @@ if (process.argv[1] && process.argv[1].endsWith('server.ts')) {
   const PORT = Number(process.env.PORT) || 3000;
   const ludoServer = new LudoServer();
   ludoServer.listen(PORT, () => {
-    console.log(`🎲 Ludo Online Server running at http://localhost:${PORT}`);
+    console.log(`🎲 Ludo King Server running at http://localhost:${PORT}`);
   });
 }
